@@ -18,6 +18,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 Author: Robert Alm, almrobert@gmail.com
 */
 
+/*
+ * ATTinyTetris (ATTiny412) - Pre-Alpha-version
+ */
 #include <util/delay.h>
 #include <avr/interrupt.h>
 #include <avr/io.h>
@@ -52,6 +55,7 @@ const uint8_t DisplayInit[INIT_LENGTH] = {
   0xAF              // Display on
 };
 
+//Setup the display parameters and clear it
 void initDisplay() {
     //Command Init
     startMiniTinyI2C(LCD_I2C_ADDR, false);
@@ -87,16 +91,21 @@ void setDisplayArea(uint8_t column, uint8_t row, uint8_t lines) {
     stopMiniTinyI2C();
 }
 
+//Tells screen that drawing should start
 void startDrawing(uint8_t column, uint8_t row, uint8_t lines) {
     setDisplayArea(column, row, lines);
     startMiniTinyI2C(LCD_I2C_ADDR, false);
     writeMiniTinyI2C(LCD_DATA);
 }
 
+//Tells screen that drawing is finished
 void stopDrawing() {
     stopMiniTinyI2C();
 }
 
+//Draw a screen segment.
+//Screen is configured to draw byte-aligned, MSB to the left, on a portrait screen
+//Routine draws arbitrary number of lines.
 void drawSegment(uint8_t column, uint8_t row, uint8_t lines, uint8_t* data) {
     startDrawing(column, row, lines);
     for (uint8_t i = 0; i < lines; i++) {
@@ -374,6 +383,7 @@ static bool checkPosition(const uint8_t x, const uint8_t y) {
     return (gGameBoard[y] & (0x8000 >> x)); 
 }
 
+//Make a refresh-draw of the board -- optionally do only partial update if full refresh is not needed
 void refreshBoard(bool partial) {
     uint8_t yStart = 0;
     uint8_t yEnd = BOARD_LINES;
@@ -407,6 +417,7 @@ void refreshBoard(bool partial) {
 
 }
 
+//Check if current position is valid -- or draw the new position (Combined routine as they are very similar)
 bool checkAllowedPositionOrDraw(bool draw, bool erase) {
     uint16_t tileRow = 0;
     for(uint8_t i = 0; i < 4; i++) {
@@ -424,6 +435,7 @@ bool checkAllowedPositionOrDraw(bool draw, bool erase) {
     return true;
 }
 
+//Update position and rotation of current tile
 bool updateTilePosition(int deltaX, int deltaY, bool rotate) {
     bool ret = true;
     uint16_t backupTile = gCurrentTile;
@@ -439,7 +451,7 @@ bool updateTilePosition(int deltaX, int deltaY, bool rotate) {
     if(rotate && (gCurrentTileIndex != 0)) {
         uint16_t newTile = 0;
 
-        //Ugly! But saves flash! Static rotations!
+        //Ugly! But saves memory and is very fast! Static rotations!
         if (gCurrentTile == 0b0000111100000000) newTile = 0b0100010001000100;
         if (gCurrentTile == 0b0100010001000100) newTile = 0b0000111100000000;
 
@@ -480,6 +492,7 @@ bool updateTilePosition(int deltaX, int deltaY, bool rotate) {
     return ret;
 }
 
+//Draw the Next-tile-field
 void drawNextTile() {
     uint8_t out[7];
 
@@ -508,6 +521,8 @@ void drawNextTile() {
     drawSegment(NEXT_TILE_COLUMN_OFFSET+1, NEXT_TILE_ROW_OFFSET, 7, out);
 }
 
+//Generate next tile
+//TODO: RNG!
 void generateNextTile() {
     gCurrentTileIndex = gNextTile;
     gNextTile++;
@@ -515,6 +530,7 @@ void generateNextTile() {
     drawNextTile();
 }
 
+//Insert Next tile into Game Board
 bool insertNextTile() {
     bool ret = true;
     gCurrentTile = tiles[gNextTile] << 8;
@@ -526,6 +542,7 @@ bool insertNextTile() {
     return ret;
 }
 
+//Draw two digits (Drawing two digits at a time saves precious memory and cycles due to screen blitting limitations)
 void drawTwoDigits(int column, int row, uint8_t value) {
     uint8_t out[6];
     uint8_t left = (value & 0xF0) >> 4;
@@ -541,11 +558,13 @@ void drawTwoDigits(int column, int row, uint8_t value) {
     drawSegment(column, row, 6, out);
 }
 
+//Draw the linecount-field
 void drawLines() {
     drawTwoDigits(LINES_COLUMN_OFFSET, LINES_ROW_OFFSET, gLines >> 8);
     drawTwoDigits(LINES_COLUMN_OFFSET+1, LINES_ROW_OFFSET, gLines & 0x00FF);
 }
 
+//Draw the Current Score-field
 void drawScore() {
     drawTwoDigits(SCORE_COLUMN_OFFSET, SCORE_ROW_OFFSET, gScore >> 24);
     drawTwoDigits(SCORE_COLUMN_OFFSET+1, SCORE_ROW_OFFSET, (gScore & 0x00FF0000) >> 16);
@@ -553,6 +572,7 @@ void drawScore() {
     drawTwoDigits(SCORE_COLUMN_OFFSET+3, SCORE_ROW_OFFSET, gScore & 0x000000FF);
 }
 
+//Draw the Highscore-field
 void drawHiScore() {
     drawTwoDigits(HISCORE_COLUMN_OFFSET, HISCORE_ROW_OFFSET, gHiScore >> 24);
     drawTwoDigits(HISCORE_COLUMN_OFFSET+1, HISCORE_ROW_OFFSET, (gHiScore & 0x00FF0000) >> 16);
@@ -560,6 +580,7 @@ void drawHiScore() {
     drawTwoDigits(HISCORE_COLUMN_OFFSET+3, HISCORE_ROW_OFFSET, gHiScore & 0x000000FF);
 }
 
+//Initialize controller ADC
 void initController() {
     //Set ADC to VDD reference voltage and prescaler to 256 divisor (20/256 = 78kHz)
     ADC0.CTRLC = ADC_SAMPCAP_bm | ADC_REFSEL_VDDREF_gc | ADC_PRESC_DIV256_gc;
@@ -592,6 +613,7 @@ void initController() {
 
 }
 
+//Interrupt-routine for buttons ADC
 ISR(ADC0_RESRDY_vect) {
     //Check if it was direction or rotation pin
     //Conversion result is in ADC0.RESL
@@ -637,6 +659,7 @@ ISR(ADC0_RESRDY_vect) {
     ADC0.COMMAND |= ADC_STCONV_bm;
 }
 
+//Check button statuses
 void checkButtonsAndDelay() {
     for (uint8_t i = 0; i < 2; i++) {
         switch (gDirectionalButton) {
@@ -662,6 +685,7 @@ void checkButtonsAndDelay() {
     }
 }
 
+//Detect completed lines, add score and erase!
 void checkAndRemoveCompletedLines() {
     uint8_t completedLines = 0;
     for (int8_t i = 3; i >= 0; i--) {
@@ -680,6 +704,7 @@ void checkAndRemoveCompletedLines() {
     gScore += (SCORE_LINESCORE_BASE << completedLines);
 }
 
+//Game Over animation
 void gameOver() {
     for (int8_t i = BOARD_LINES-2; i >= 0; i--) {
         gGameBoard[i] = 0xFFF0;
@@ -687,7 +712,7 @@ void gameOver() {
     }
 }
 
-//Notes
+//Notes for the audio
 // 20000000 / (2 * 4 * Hz) = PERBUF --> CMP0BUF == (PERBUF >> 1)
 // E4 = 330Hz == 1263
 // G4 = 392Hz == 1063
@@ -726,6 +751,7 @@ const uint16_t notes[NOTE_COUNT * 2] = {
 uint16_t gNotePos = 0;
 uint8_t gNoteRepeat = 0;
 
+//Initialize Audio Timer and PWM
 void initAudio() {
     //PWM peripheral
     PORTMUX.CTRLA = PORTMUX_TCA00_DEFAULT_gc;
@@ -742,6 +768,7 @@ void initAudio() {
     RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc | RTC_PITEN_bm;
 }
 
+//Interrupt handler for audio
 ISR(RTC_PIT_vect) {
     RTC.PITINTFLAGS = RTC_PI_bm;
     if(gNoteRepeat > 0) {
@@ -755,15 +782,27 @@ ISR(RTC_PIT_vect) {
     if(gNotePos == (NOTE_COUNT * 2)) gNotePos = 0;
 }
 
+//Main Game Loop
 int main() {
+    //Initialize I2C for screen communication
     initMiniTinyI2C(1100);
+
+    //Send initialization to screen
     initDisplay();
+    
+    //Initialize Controller ADC and interrupt
     initController();
+
+    //Initialize and start Audio-routine (Timer and PWM output)
     initAudio();
     
+    //Draw the highscore-field
     drawHiScore();
 
+    //Inject first tile
     insertNextTile();
+
+    //Game-loop
     while(1) {
         if(!updateTilePosition(0, 1, false)) {
             if(gCurrentPos[1] == 0) {
